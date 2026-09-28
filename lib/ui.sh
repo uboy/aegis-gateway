@@ -54,21 +54,23 @@ ui_port_reusable_for_selected_service() {
 ui_select_components() {
     local choices
     choices=$(whiptail --title "Aegis Gateway - Выбор" --checklist \
-    "Выберите компоненты для установки (Пробел - выбор, Enter - подтверждение):" 21 70 11 \
-    "XUI" "3x-ui Panel (Xray/VLESS/Reality)" ON \
-    "OpenVPN" "Классический VPN через DockOVPN" OFF \
+    "Выберите компоненты для установки (Пробел - выбор, Enter - подтверждение):" 22 75 12 \
+    "XUI" "3x-ui Panel (Xray/VLESS Reality)" ON \
+    "Amnezia" "AmneziaWG защищенный туннель (UDP/39442)" ON \
+    "OpenVPN" "Классический VPN (Legacy / Корпоративный доступ)" OFF \
     "OpenConnect" "Cisco AnyConnect совместимый VPN" OFF \
     "Dumbproxy" "HTTP/HTTPS прокси-сервер с авторизацией" OFF \
-    "MTProto" "Telegram MTProto прокси" OFF \
-    "WARP" "Обход DPI для Telegram (WARP WG)" OFF \
+    "MTProto" "Telegram WebProxy и Fake-TLS (Единый порт 443)" OFF \
+    "WARP" "Cloudflare WARP Egress туннель" OFF \
     "Hardening" "Усиление безопасности SSH/Fail2Ban/UFW" ON 3>&1 1>&2 2>&3) || exit 0
 
     # Сбрасываем флаги
     INSTALL_XUI="false"
+    INSTALL_AMNEZIA="false"
     INSTALL_OPENVPN="false"
     INSTALL_OPENCONNECT="false"
-    INSTALL_AMNEZIA="false"
     INSTALL_DUMBPROXY="false"
+    INSTALL_TPROXY="false"
     INSTALL_MTPROXY="false"
     INSTALL_WARP_TELEGRAM="false"
     INSTALL_HARDENING="false"
@@ -76,17 +78,21 @@ ui_select_components() {
     for choice in $choices; do
         case $choice in
             "\"XUI\"") INSTALL_XUI="true" ;;
+            "\"Amnezia\"") INSTALL_AMNEZIA="true" ;;
             "\"OpenVPN\"") INSTALL_OPENVPN="true" ;;
             "\"OpenConnect\"") INSTALL_OPENCONNECT="true" ;;
             "\"Dumbproxy\"") INSTALL_DUMBPROXY="true" ;;
-            "\"MTProto\"") INSTALL_MTPROXY="true" ;;
+            "\"MTProto\"")
+                INSTALL_TPROXY="true"
+                INSTALL_MTPROXY="true"
+                ;;
             "\"WARP\"") INSTALL_WARP_TELEGRAM="true" ;;
             "\"Hardening\"") INSTALL_HARDENING="true" ;;
         esac
     done
 
     # Если ничего не выбрано - выходим
-    if [[ "$INSTALL_XUI" == "false" && "$INSTALL_OPENVPN" == "false" && "$INSTALL_OPENCONNECT" == "false" && "$INSTALL_DUMBPROXY" == "false" && "$INSTALL_MTPROXY" == "false" && "$INSTALL_WARP_TELEGRAM" == "false" && "$INSTALL_HARDENING" == "false" ]]; then
+    if [[ "$INSTALL_XUI" == "false" && "$INSTALL_AMNEZIA" == "false" && "$INSTALL_OPENVPN" == "false" && "$INSTALL_OPENCONNECT" == "false" && "$INSTALL_DUMBPROXY" == "false" && "$INSTALL_TPROXY" == "false" && "$INSTALL_MTPROXY" == "false" && "$INSTALL_WARP_TELEGRAM" == "false" && "$INSTALL_HARDENING" == "false" ]]; then
         whiptail --title "Ошибка" --msgbox "Ничего не выбрано. Установка отменена." 10 60
         exit 0
     fi
@@ -546,10 +552,10 @@ ui_final_report() {
     fi
 
     if [[ "$INSTALL_WARP_TELEGRAM" == "true" ]]; then
-        report="${report}${BLUE}${BOLD}--- Telegram WARP DPI Bypass ---${NC}\n"
+        report="${report}${BLUE}${BOLD}--- Telegram WARP Egress Routing ---${NC}\n"
         report="${report}Статус: Установлен нативно через wgcf (wg-quick@warp)\n"
         report="${report}NAT/Split-Tunnel: Настроен для подсетей Telegram\n"
-        report="${report}Влияние: Все локальные VPN-клиенты теперь обходят DPI для Telegram\n\n"
+        report="${report}Влияние: Локальные VPN-клиенты маршрутизируют трафик Telegram через выделенный интерфейс\n\n"
     elif [[ "$INSTALL_WARP_TELEGRAM" == "skipped" ]]; then
         report="${report}${YELLOW}--- Telegram WARP (Пропущено) ---${NC}\n\n"
     fi

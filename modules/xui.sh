@@ -147,11 +147,10 @@ module_xui_configure() {
 
         local settings stream_settings reality_dest reality_server_name reality_flow
         # Compatibility-first defaults (can be overridden via env):
-        # - REALITY_DEST (e.g. google.com:443, www.cloudflare.com:443)
-        # - REALITY_SERVER_NAME (SNI)
-        # - REALITY_FLOW (e.g. "", xtls-rprx-vision)
-        reality_dest="${REALITY_DEST:-google.com:443}"
-        reality_server_name="${REALITY_SERVER_NAME:-google.com}"
+        # Default to a distributed global CDN service (e.g. gateway.icloud.com, addons.mozilla.org)
+        # to avoid SNI-IP mismatch detection inherent to fixed-IP providers (like Google).
+        reality_dest="${REALITY_DEST:-gateway.icloud.com:443}"
+        reality_server_name="${REALITY_SERVER_NAME:-gateway.icloud.com}"
         # xtls-rprx-vision — рекомендуемый flow для Reality+TCP: нативный TLS внутри туннеля,
         # лучшая пропускная способность и стабильность по сравнению с пустым flow.
         reality_flow="${REALITY_FLOW:-xtls-rprx-vision}"

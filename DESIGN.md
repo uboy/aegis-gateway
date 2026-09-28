@@ -1,24 +1,26 @@
 # Aegis Gateway Design
 
 ## Goal and Overview
-Aegis Gateway is an enterprise-grade multi-protocol edge gateway and deployment orchestrator for Ubuntu 24.04. It consolidates multiple proxy, VPN, and anti-censorship protocols behind an SNI-multiplexed frontend, providing robust DPI evasion, zero-downtime maintenance, and strict host hardening.
+Aegis Gateway is an enterprise-grade multi-protocol edge gateway and deployment orchestrator for Ubuntu 24.04. It consolidates multiple secure proxy, VPN, and transport routing services behind a single unified SNI-multiplexed frontend on port 443, providing zero-downtime maintenance, protocol metadata protection, and strict host hardening.
 
 ## Core Architecture
 
 ### 1. Ingress & SNI Multiplexing
-- **HAProxy Frontend (Port 443 TCP)**: Operates at Layer 4 SNI inspection.
-  - SNI matching domain A (e.g. proxy domain) -> routed locally to **Caddy** (HTTPS Forward Proxy + Naive/gRPC/WebDAV fallback).
-  - SNI matching fake TLS disguise domain (e.g. google.com / cloudflare.com) -> routed to **Teleproxy** (Telegram MTProto Fake-TLS).
-  - Unrecognized SNI or direct IP probing -> routed to Caddy fallback / honeypot upstream, returning standard HTTP responses and concealing the gateway services.
+- **HAProxy Frontend (Port 443 TCP)**: Operates at Layer 4 SNI inspection without payload decryption.
+  - SNI matching proxy domain (with TLS handshake) -> routed locally to `127.0.0.1:2399` (**mtproxy-tls** Fake-TLS backend).
+  - ALPN present without SNI (Telegram Desktop client connecting by IP) -> routed to `127.0.0.1:4431` (**Caddy** terminating TLS -> **tproxy-server** WebSocket relay on `127.0.0.1:8080` -> internal MTProxy RPC on `127.0.0.1:2398`).
+  - Connections without TLS handshake (plain secret) -> routed to `127.0.0.1:2398` (**mtproxy** plain backend).
+  - SNI matching administrative domain -> routed locally to `127.0.0.1:4430` (**Dumbproxy** HTTPS forward proxy).
+  - Unrecognized SNI or direct IP probing -> routed to Caddy honeypot (`127.0.0.1:4431`), serving a valid static website and strict security headers, completely concealing internal services.
 - **Port 80 TCP**: Dedicated to HTTP challenges (Let's Encrypt / Certbot standalone or Caddy HTTP-01) and redirect to HTTPS.
 
 ### 2. Supported Protocols & Components
-- **AmneziaWG**: Modern WireGuard implementation with protocol obfuscation (init packet magic headers, junk packet ranges, and custom under-the-radar packet size limits) designed to resist deep packet inspection (DPI).
-- **Caddy (with forwardproxy plugin)**: High-performance HTTPS forward proxy requiring TLS client credentials, serving genuine camouflage static website content to unauthenticated requests.
+- **AmneziaWG**: Modern high-performance WireGuard implementation with protocol header randomization and customizable packet sizes, preventing signature and metadata-based traffic profiling.
+- **Telegram Proxy**: Unified stealth setup on port 443 supporting both WebProxy (Telegram Desktop) and Fake-TLS (Telegram Mobile) backed by an isolated local MTProxy daemon.
+- **Caddy**: High-performance reverse proxy and static site server serving genuine website content to unauthenticated requests.
 - **Dumbproxy**: Standalone secure HTTP/HTTPS proxy with user authentication and rate limiting.
-- **Teleproxy (MTProto Fake-TLS)**: Native Telegram proxy utilizing 16-byte TLS camouflage secrets.
-- **3x-ui / Xray-core**: Optional multi-protocol panel (VLESS, VMess, Trojan, Shadowsocks) with Reality TLS camouflage.
-- **Cloudflare WARP (wireguard-go)**: Internal egress tunnel routing Telegram or regional API traffic through Cloudflare edge IP pool to avoid datacenter IP bans.
+- **3x-ui / Xray-core**: Multi-protocol panel (VLESS Reality, Trojan) using CDN-based camouflage targets and packet padding (`xtls-rprx-vision`), with management access isolated via SSH tunnels.
+- **Cloudflare WARP (wireguard-go)**: Internal egress tunnel routing regional API traffic through Cloudflare edge IP pool to avoid datacenter IP restrictions.
 
 ### 3. Safe Upgrade Pipeline
 - **Pre-flight Health Checks**:

@@ -1,7 +1,7 @@
 # Архитектура проекта Aegis Gateway
 
 ## Основная концепция
-Aegis Gateway — это универсальный модульный edge-шлюз и установщик для Ubuntu 24.04, обеспечивающий комплексную систему маршрутизации трафика, обхода блокировок (DPI evasion), обратных прокси и безопасного управления сервисами.
+Aegis Gateway — это универсальный модульный edge-шлюз и установщик для Ubuntu 24.04, обеспечивающий комплексную систему защищенной маршрутизации трафика, шифрования удаленного доступа, обратных прокси и безопасного управления сетевыми сервисами.
 
 ## Структура директорий
 ```text
@@ -17,24 +17,31 @@ Aegis Gateway — это универсальный модульный edge-шл
 │   ├── xui_api.sh        # Взаимодействие с API панели 3x-ui
 │   └── upgrade.sh        # Движок безопасного обновления (pre-flight, atomic swap, rollback)
 ├── modules/              # Независимые модули установки компонентов
-│   ├── base.sh           # Системные пакеты, базовая настройка ОС
+│   ├── base.sh           # Системные пакеты, базовая настройка ОС, BBR + FQ
 │   ├── hardening.sh      # Hardening: SSH (non-standard port, no root), Fail2Ban (nftables)
-│   ├── xui.sh            # Установка 3x-ui (Docker, VLESS/Reality)
-│   ├── amnezia.sh        # AmneziaWG (нативный DKMS модуль, защита от DPI)
-│   ├── dumbproxy.sh      # Защищенный HTTP/HTTPS прокси-сервер
-│   ├── mtproto.sh        # Telegram MTProto Fake-TLS прокси (Teleproxy)
-│   ├── tproxy_server.sh  # HAProxy SNI multiplexer + Caddy reverse proxy
-│   ├── openvpn.sh        # OpenVPN сервер
+│   ├── xui.sh            # Установка 3x-ui (Docker, VLESS Reality с CDN-маскировкой)
+│   ├── amnezia.sh        # AmneziaWG (нативный DKMS модуль, рандомизация заголовков)
+│   ├── dumbproxy.sh      # Защищенный HTTP/HTTPS прокси-сервер с авторизацией
+│   ├── tproxy_server.sh  # HAProxy SNI multiplexer (443) + Telegram WebProxy & MTProxy
+│   ├── openvpn.sh        # OpenVPN сервер (Legacy / Корпоративный доступ)
 │   ├── openconnect.sh    # OpenConnect (Cisco AnyConnect / ocserv)
-│   └── warp_telegram.sh  # Cloudflare WARP туннель для Telegram / Google
+│   └── warp_telegram.sh  # Cloudflare WARP egress-туннель для маршрутизации внешних API
 ├── scripts/              # Скрипты обслуживания
 │   └── upgrade-services.sh # CLI оркестратор безопасного обновления сервисов
 ├── systemd/              # Юниты systemd
 │   ├── aegis-upgrade.service # Сервис автоматического обновления
 │   └── aegis-upgrade.timer   # Еженедельный таймер обновления
-└── docs/                 # Документация и ранбуки
-    └── mtproto_runbook.md
+└── docs/                 # Документация и архитектурные ранбуки
+    └── telegram_proxy_runbook.md # Описание схемы единого порта 443
 ```
+
+## Схема маршрутизации единого Ingress (Порт 443 TCP)
+Фронтенд шлюза строится на базе **HAProxy** на порту 443 без расшифровки payload (L4 SNI passthrough):
+1. **Fake-TLS MTProto**: SNI прокси-домена -> `127.0.0.1:2399` (`mtproxy-tls`).
+2. **Telegram WebProxy**: Запросы с ALPN без SNI (Desktop клиенты по IP) -> `127.0.0.1:4431` (`Caddy` -> `tproxy-server` `127.0.0.1:8080` -> бэкенд `mtproxy` `127.0.0.1:2398`).
+3. **MTProto Obfuscated2**: Пакеты без TLS-рукопожатия -> `127.0.0.1:2398` (`mtproxy`).
+4. **Dumbproxy**: SNI служебного домена -> `127.0.0.1:4430`.
+5. **Honeypot Fallback**: Любые нераспознанные подключения или прямые сканы -> `127.0.0.1:4431` (Caddy сайт-заглушка с валидными HTTP-заголовками).
 
 ## Жизненный цикл (Execution Flow)
 1. **Инициализация**: Запуск `install.sh`. Подгрузка библиотек из `lib/`.
@@ -42,14 +49,14 @@ Aegis Gateway — это универсальный модульный edge-шл
 3. **UI / Промпты**: Скрипт запрашивает параметры компонентов, домены, порты, учетные данные через консольный или whiptail UI.
 4. **Сохранение состояния**: Выбор и введенные данные сохраняются в `/root/.aegis-vpn.state`.
 5. **Pre-flight Check**: Валидация входных параметров (домены, доступность портов, конфликты).
-6. **Базовая настройка**: `modules/base.sh` (системные пакеты, Docker, тюнинг ядра) -> `modules/hardening.sh` (SSH, Fail2Ban).
+6. **Базовая настройка**: `modules/base.sh` (системные пакеты, Docker, тюнинг ядра BBR/FQ) -> `modules/hardening.sh` (SSH, Fail2Ban).
 7. **Исполнение модулей**: Поочередный вызов `module_<name>_install` и `module_<name>_configure` для выбранных компонентов.
 8. **Пост-конфигурация**: Настройка UFW, проверка сервисов, генерация финального отчета с доступами.
 
 ## Стандарты модулей
-Каждый модуль должен экспортировать 2-3 основные функции:
+Каждый модуль экспортирует основные функции:
 - `module_<name>_install` — скачивание пакетов/образов, раскладка файлов.
 - `module_<name>_configure` — применение конфигурации, генерация ключей/сертификатов.
 - *(Опционально)* `module_<name>_status` — проверка работоспособности.
 
-Модули не должны напрямую менять настройки других модулей. Для открытия портов они вызывают функцию из `lib/firewall.sh`.
+Модули изолированы друг от друга и не модифицируют чужие файлы конфигураций напрямую. Открытие портов выполняется строго через `lib/firewall.sh`.

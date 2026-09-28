@@ -146,7 +146,7 @@ module_mtproto_install() {
     # Config file (TOML)
     # direct = true: подключается напрямую к Telegram DC без ME relay
     # domain: Fake-TLS маскировка — трафик неотличим от HTTPS к реальному сайту
-    # MSS clamp включён по умолчанию: фрагментирует ClientHello, ломая DPI-реассемблинг
+    # MSS clamp включён по умолчанию: оптимизирует сегментацию пакетов ClientHello
     cat > "${mt_conf_dir}/config.toml" <<EOF
 port = ${mt_port}
 direct = true

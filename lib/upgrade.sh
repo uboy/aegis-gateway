@@ -150,7 +150,7 @@ upgrade_caddy() {
     fi
 
     if ! caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
-      error "Текущий Caddyfile содержит ошибки синтаксиса. Апгрейд заблокирован."
+      error "Текущий Caddyfile содержит ошибки синтаксиса. Апгрейд остановлен."
       return 1
     fi
   fi

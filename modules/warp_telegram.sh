@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 module_warp_telegram_install() {
-  log "Установка Cloudflare WARP (через wgcf) для обхода DPI для Telegram..."
+  log "Установка Cloudflare WARP (через wgcf) для маршрутизации трафика Telegram..."
 
   # Установка wireguard-tools, если еще не установлен
   if ! command -v wg-quick &>/dev/null; then
@@ -47,11 +47,6 @@ module_warp_telegram_install() {
   # if GOOGLE_IPS=$(curl -sSLf https://www.gstatic.com/ipranges/goog.json | grep -o '"ipv4Prefix": "[^"]*"' | cut -d '"' -f 4 | paste -sd, -); then
   #   if [[ -n "$GOOGLE_IPS" ]]; then
   #     TELEGRAM_IPS="${TELEGRAM_IPS}, ${GOOGLE_IPS}"
-  #   fi
-  # else
-  #   warn "Не удалось получить IP-адреса Google. Обход DPI для YouTube может работать не полностью."
-  # fi
-  
   # Удаляем замену DNS
   sed -i 's/^DNS = /#DNS = /' wgcf-profile.conf
   
@@ -65,7 +60,7 @@ module_warp_telegram_install() {
   # Добавляем MASQUERADE для локальных VPN клиентов
   sed -i '/^MTU = /a PostUp = iptables -t nat -I POSTROUTING -o warp -j MASQUERADE\nPostDown = iptables -t nat -D POSTROUTING -o warp -j MASQUERADE' wgcf-profile.conf
   
-  # Блокировка IPv6 для Telegram в ядре (чтобы клиенты моментально фоллбэчились на IPv4)
+  # Фильтрация IPv6 для Telegram в ядре (чтобы клиенты моментально переключались на IPv4)
   # Пишем скрипт, который будет стартовать вместе с интерфейсом
   local IPV6_BLOCK_SCRIPT="/usr/local/bin/telegram_ipv6_block.sh"
   cat << 'EOF' > "$IPV6_BLOCK_SCRIPT"
@@ -77,7 +72,7 @@ EOF
   chmod +x "$IPV6_BLOCK_SCRIPT"
   "$IPV6_BLOCK_SCRIPT" # Выполняем сразу
   
-  # Добавляем вызов скрипта блокировки в PostUp, сразу после первого PostUp (MASQUERADE)
+  # Добавляем вызов скрипта фильтрации в PostUp, сразу после первого PostUp (MASQUERADE)
   sed -i "/^PostUp = iptables/a PostUp = $IPV6_BLOCK_SCRIPT" wgcf-profile.conf
 
   # Переносим конфигурацию в wireguard
@@ -107,7 +102,7 @@ EOF
   systemctl enable --now wg-quick@warp
   
   if ip link show warp >/dev/null 2>&1; then
-    success "Туннель WARP для обхода DPI Telegram успешно настроен и запущен."
+    success "Туннель WARP для Telegram успешно настроен и запущен."
   else
     error "Не удалось поднять интерфейс WARP."
   fi

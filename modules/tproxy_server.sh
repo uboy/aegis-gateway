@@ -60,13 +60,17 @@ frontend port443
 
     # Loop prevention for local/internal connections
     use_backend backend_tproxy if { src 127.0.0.1 ::1 ${srv_ip} }
+    use_backend backend_tproxy if { src 127.0.0.1 }
 
-    # Telegram WebProxy: match SNI or ALPN without SNI (Telegram Desktop client)
-    use_backend backend_tproxy if { req_ssl_sni -i ${tp_domain} }
+    # 1. MTProto FakeTLS (Telegram Mobile) AND WebProxy (Telegram Desktop)
+    use_backend backend_mtproto_tls if { req_ssl_hello_type 1 } { req_ssl_sni -i ${tp_domain} }
     use_backend backend_tproxy if { req_ssl_hello_type 1 } !{ req_ssl_sni -m found } { req.ssl_alpn -m found }
+
+    # 2. MTProto Obfuscated2 (Direct secret without TLS Hello)
+    use_backend backend_mtproto_plain if !{ req_ssl_hello_type 1 }
 EOF
 
-    # Dumbproxy routing: if dedicated domain is provided, match SNI and fallback to tproxy (prevents scanner ACME rate-limits)
+    # Dumbproxy routing: if dedicated domain is provided, match SNI and fallback to tproxy
     if [[ -n "${DOMAIN:-}" ]] && [[ "${DOMAIN:-}" != "${tp_domain}" ]]; then
         cat >> /etc/haproxy/haproxy.cfg <<EOF
     use_backend backend_dumbproxy if { req_ssl_sni -i ${DOMAIN} }
@@ -74,7 +78,7 @@ EOF
 EOF
     else
         cat >> /etc/haproxy/haproxy.cfg <<EOF
-    default_backend backend_dumbproxy
+    default_backend backend_tproxy
 EOF
     fi
 
@@ -83,6 +87,14 @@ EOF
 backend backend_tproxy
     mode tcp
     server caddy 127.0.0.1:4431
+
+backend backend_mtproto_tls
+    mode tcp
+    server mtproto_tls 127.0.0.1:2399
+
+backend backend_mtproto_plain
+    mode tcp
+    server mtproto_plain 127.0.0.1:2398
 
 backend backend_dumbproxy
     mode tcp
@@ -101,10 +113,8 @@ EOF
 </html>
 EOF
 
-    # Убираем nginx-light, он не нужен и может конфликтовать за 80 порт
     apt-get install -y haproxy curl jq git
     
-    # ... (пропущено до загрузки tproxy-server)
     log "Загрузка и установка официального tproxy-server..."
     local inst_dir="/tmp/tproxy-install"
     rm -rf "$inst_dir"
@@ -127,7 +137,6 @@ EOF
 		protocols h1 h2
 		timeouts {
 			read_header 10s
-			# read_body 60s
 		}
 	}
 }
@@ -138,7 +147,6 @@ EOF
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	reverse_proxy 127.0.0.1:8080 {
 		transport http {
-			# response_header_timeout 40s
 		}
 	}
 	handle_errors {
@@ -156,17 +164,49 @@ EOF
 }
 EOF
     
-    # Запускаем установку
+    # Запускаем установку официального tproxy-server и mtproxy бэкенда
     chmod +x deploy/install.sh
     ./deploy/install.sh --hostname "$tp_domain" --email "admin@${tp_domain}" --site-dir /var/www/tproxy-site --secret "$tp_secret"
     popd >/dev/null
     rm -rf "$inst_dir"
 
+    # Настройка дополнительного бэкенда mtproxy-tls на порту 2399 для Fake-TLS (Telegram Mobile)
+    log "Настройка Fake-TLS бэкенда (mtproxy-tls на порту 2399)..."
+    cat > /etc/systemd/system/mtproxy-tls.service <<EOF
+[Unit]
+Description=Official Telegram MTProxy Fake-TLS backend
+After=network-online.target tproxy-firewall.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mtproxy
+Group=mtproxy
+EnvironmentFile=/etc/mtproxy/mtproxy.env
+Environment=MTPROXY_WORKERS=1
+Environment=MTPROXY_MAX_CONNECTIONS=4096
+WorkingDirectory=/opt/MTProxy
+ExecStart=/opt/MTProxy/objs/bin/mtproto-proxy -u mtproxy -p 8889 -H 2399 -S \${MTPROXY_SECRET} -D ${tp_domain} --aes-pwd /etc/mtproxy/proxy-secret /etc/mtproxy/proxy-multi.conf -M \${MTPROXY_WORKERS} -C \${MTPROXY_MAX_CONNECTIONS}
+Restart=on-failure
+RestartSec=3s
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable --now mtproxy-tls || true
+
     firewall_allow 443 tcp
 
-    success "WEB-прокси для Telegram успешно установлен!"
-    success "Параметры для Telegram:"
-    success "Домен: ${tp_domain}"
-    success "Порт: 443"
-    success "Секрет: ${tp_secret}"
+    local hex_domain ee_secret tg_link
+    hex_domain=$(python3 -c "import sys; print(sys.argv[1].encode().hex())" "$tp_domain" 2>/dev/null || true)
+    ee_secret="ee${tp_secret}${hex_domain}"
+    tg_link="tg://proxy?server=${srv_ip}&port=443&secret=${ee_secret}"
+
+    success "Защищенный Telegram Proxy (WebProxy + Fake-TLS) успешно установлен на порту 443!"
+    success "Параметры подключения:"
+    success "1. Telegram WebProxy (Desktop): https://${tp_domain}:443 (секрет: ${tp_secret})"
+    success "2. Telegram Mobile (Fake-TLS на порту 443): ${tg_link}"
 }
