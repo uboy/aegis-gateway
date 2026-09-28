@@ -84,7 +84,7 @@ ui_select_components() {
             "\"Dumbproxy\"") INSTALL_DUMBPROXY="true" ;;
             "\"MTProto\"")
                 INSTALL_TPROXY="true"
-                INSTALL_MTPROXY="true"
+                INSTALL_MTPROXY="false"
                 ;;
             "\"WARP\"") INSTALL_WARP_TELEGRAM="true" ;;
             "\"Hardening\"") INSTALL_HARDENING="true" ;;
@@ -424,6 +424,58 @@ ui_get_mtproto_domain() {
     done
 }
 
+ui_get_tproxy_info() {
+    [[ "${INSTALL_TPROXY:-false}" == "true" ]] || return 0
+
+    local _default_domain="${TPROXY_DOMAIN:-${DOMAIN:-}}"
+    local _default_sni="${TPROXY_FAKETLS_SNI:-magic-ball.duckdns.org}"
+
+    while true; do
+        local _domain
+        if ! _domain=$(whiptail --title "Telegram WebProxy (Desktop) — Домен" \
+            --inputbox "Введите домен для Telegram WebProxy (Desktop).\n\nНАЗНАЧЕНИЕ: Реальный домен, указывающий (DNS A-запись) на IP этого сервера.\nCaddy использует его для выпуска валидного TLS-сертификата.\n\nПример: proxy.example.com" \
+            14 75 "$_default_domain" 3>&1 1>&2 2>&3); then
+            exit 0
+        fi
+
+        if ! is_valid_domain "$_domain"; then
+            whiptail --title "Ошибка" --msgbox "Некорректный домен: '${_domain}'." 10 60
+            _default_domain="$_domain"
+            continue
+        fi
+
+        TPROXY_DOMAIN="$_domain"
+        break
+    done
+
+    while true; do
+        local _sni
+        if ! _sni=$(whiptail --title "Telegram Mobile — Маскировочный Fake-TLS SNI" \
+            --inputbox "Введите маскировочный SNI для Telegram Mobile (Fake-TLS).\n\nНАЗНАЧЕНИЕ: Внешний домен для маскировки мобильного MTProto рукопожатия.\n\nВНИМАНИЕ: Не должен совпадать с доменом WebProxy (${TPROXY_DOMAIN}), чтобы HAProxy на 443 порту разделял трафик без коллизий.\n\nПример: magic-ball.duckdns.org или gateway.icloud.com" \
+            16 75 "$_default_sni" 3>&1 1>&2 2>&3); then
+            exit 0
+        fi
+
+        if ! is_valid_domain "$_sni"; then
+            whiptail --title "Ошибка" --msgbox "Некорректный SNI: '${_sni}'." 10 60
+            _default_sni="$_sni"
+            continue
+        fi
+
+        if [[ "$_sni" == "$TPROXY_DOMAIN" ]]; then
+            whiptail --title "Ошибка коллизии" --msgbox "Маскировочный SNI не может совпадать с доменом WebProxy (${TPROXY_DOMAIN}).\nHAProxy не сможет разделить входящие TLS-соединения на порту 443." 10 70
+            _default_sni="$_sni"
+            continue
+        fi
+
+        TPROXY_FAKETLS_SNI="$_sni"
+        break
+    done
+
+    save_install_state
+    return 0
+}
+
 ui_confirm_install() {
     if whiptail --title "Aegis Gateway" --yesno "Начать установку выбранных компонентов?" 10 60; then
         return 0
@@ -465,7 +517,13 @@ ui_final_report() {
     report="${report}Порт OpenConnect: ${PORT_OPENCONNECT:-4443}\n"
     report="${report}Порт AmneziaWG: ${PORT_AMNEZIA:-39442}\n"
     report="${report}Порт Dumbproxy: ${PORT_DUMBPROXY:-8080}\n"
-    report="${report}Порт MTProto: ${PORT_MTPROXY:-8443}\n\n"
+    if [[ "$INSTALL_MTPROXY" == "true" ]]; then
+        report="${report}Порт MTProto: ${PORT_MTPROXY:-8443}\n"
+    fi
+    if [[ "$INSTALL_TPROXY" == "true" ]]; then
+        report="${report}Порт Telegram Ingress: 443 (WebProxy & Fake-TLS)\n"
+    fi
+    report="${report}\n"
 
     report="${report}${BLUE}${BOLD}--- ОБЩИЕ ДАННЫЕ СЕРВЕРА ---${NC}\n"
     if [[ "${INSTALL_MODE:-}" == "super-secure" ]]; then
@@ -537,7 +595,22 @@ ui_final_report() {
         report="${report}${YELLOW}--- Dumbproxy (Пропущено) ---${NC}\n\n"
     fi
 
-    if [[ "$INSTALL_MTPROXY" == "true" ]]; then
+    if [[ "$INSTALL_TPROXY" == "true" ]]; then
+        report="${report}${BLUE}${BOLD}--- Telegram Proxy (443 Ingress) ---${NC}\n"
+        report="${report}1. Telegram WebProxy (Desktop): https://${TPROXY_DOMAIN:-${DOMAIN:-localhost}}:443\n"
+        report="${report}   Секрет: ${TPROXY_SECRET:-}\n"
+        local _faketls_sni="${TPROXY_FAKETLS_SNI:-magic-ball.duckdns.org}"
+        local _hex_sni _ee_secret _tg_link
+        _hex_sni=$(python3 -c "import sys; print(sys.argv[1].encode().hex())" "$_faketls_sni" 2>/dev/null || true)
+        _ee_secret="ee${TPROXY_SECRET:-}${_hex_sni}"
+        if [[ -n "${DOMAIN:-}" ]]; then
+            _tg_link=$(mtproto_proxy_link_tg "$DOMAIN" "443" "$_ee_secret")
+            report="${report}2. Telegram Mobile (Fake-TLS): ${_tg_link}\n"
+            report="${report}   Маскировочный SNI: ${_faketls_sni}\n\n"
+        else
+            report="${report}${YELLOW}Ссылка Telegram Mobile недоступна: DOMAIN не задан.${NC}\n\n"
+        fi
+    elif [[ "$INSTALL_MTPROXY" == "true" ]]; then
         report="${report}${BLUE}${BOLD}--- MTProto (Telegram Proxy) ---${NC}\n"
         report="${report}Сервер: ${DOMAIN}:${PORT_MTPROXY:-8443}\n"
         report="${report}Секрет: ${MTPROXY_SECRET}\n"
@@ -547,8 +620,8 @@ ui_final_report() {
         else
             report="${report}${YELLOW}Ссылка Telegram недоступна: DOMAIN не задан.${NC}\n\n"
         fi
-    elif [[ "$INSTALL_MTPROXY" == "skipped" ]]; then
-        report="${report}${YELLOW}--- MTProto (Пропущено) ---${NC}\n\n"
+    elif [[ "$INSTALL_TPROXY" == "skipped" || "$INSTALL_MTPROXY" == "skipped" ]]; then
+        report="${report}${YELLOW}--- Telegram Proxy (Пропущено) ---${NC}\n\n"
     fi
 
     if [[ "$INSTALL_WARP_TELEGRAM" == "true" ]]; then

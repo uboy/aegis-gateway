@@ -109,6 +109,8 @@ main() {
   resolve_var MTPROXY_SECRET    ""
   resolve_var MTPROXY_DOMAIN    ""
   resolve_var TPROXY_DOMAIN     ""
+  resolve_var TPROXY_FAKETLS_SNI "magic-ball.duckdns.org"
+  resolve_var TPROXY_SECRET     ""
 
   if ! command -v whiptail &>/dev/null; then
     log "Установка whiptail (интерактивный интерфейс)..."
@@ -124,6 +126,7 @@ main() {
   ui_get_panel_exposure_info
   ui_get_ports
   ui_get_mtproto_domain
+  ui_get_tproxy_info
 
   log "Шаг 3: Подтверждение и начало установки..."
   ui_confirm_install
