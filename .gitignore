@@ -1,0 +1,38 @@
+# Logs and artifacts
+*.log
+*.out
+artifacts/
+build/
+dist/
+coverage/
+*_tree.json
+*Markdown Content.md
+hostvds_knowledge_*.html
+knowledge*.js
+host_chunk_vendors.js
+instr_part_*.png
+
+# Temporary files
+tmp/
+temp/
+.scratchpad/
+*.tmp
+*.bak
+*.orig
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+secrets/
+credentials/
+# Editor and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

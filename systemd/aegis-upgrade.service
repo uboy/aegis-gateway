@@ -1,0 +1,14 @@
+[Unit]
+Description=Aegis Gateway Automated Safe Service Upgrade
+Documentation=https://github.com/uboy/aegis-gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/aegis-upgrade-services --all
+TimeoutStartSec=600
+StandardOutput=journal
+StandardError=journal
+PrivateTmp=true
+ProtectHome=yes

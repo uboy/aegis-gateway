@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekly Automated Safe Upgrade of Aegis Gateway Services
+Documentation=https://github.com/uboy/aegis-gateway
+
+[Timer]
+# Run weekly on Sunday at 04:30 AM (with random delay of up to 30m)
+OnCalendar=Sun *-*-* 04:30:00
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target
